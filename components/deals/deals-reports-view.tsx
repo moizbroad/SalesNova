@@ -232,7 +232,9 @@ export function DealsReportsView({
       lostCount = 0,
       wonValue = 0,
       lostValue = 0,
-      openedCount = 0;
+      openedCount = 0,
+      proposalCount = 0,
+      proposalValue = 0;
     history.forEach((h) => {
       if (!inRange(h.changed_at)) return;
       const d = dealById.get(h.deal_id);
@@ -245,9 +247,20 @@ export function DealsReportsView({
         lostValue += d!.value ?? 0;
       } else if (h.to_stage === "Discovery") {
         openedCount++;
+      } else if (h.to_stage === "Proposal Sent") {
+        proposalCount++;
+        proposalValue += d!.value ?? 0;
       }
     });
-    return { wonCount, lostCount, wonValue, lostValue, openedCount };
+    return {
+      wonCount,
+      lostCount,
+      wonValue,
+      lostValue,
+      openedCount,
+      proposalCount,
+      proposalValue,
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, dealById, matches, from, to]);
 
@@ -365,6 +378,11 @@ export function DealsReportsView({
         <KpiCard
           label="Deals opened (in range)"
           value={String(wonLost.openedCount)}
+        />
+        <KpiCard
+          label="Proposal sent (in range)"
+          value={String(wonLost.proposalCount)}
+          sub={formatMoney(wonLost.proposalValue)}
         />
         <KpiCard
           label="Average deal value"
