@@ -24,31 +24,69 @@ SDRs manage lead qualification, admins manage deals, and the founder can ask Cla
 ## Architecture
 
 ```mermaid
-flowchart LR
-    User[SDR or administrator] --> Browser[React UI]
-    Browser --> Next[Next.js App Router]
-    Next --> Pages[Server Components: read data]
-    Next --> Actions[Server Actions: validate and mutate]
-    Pages --> Session[Supabase client with user session]
-    Actions --> Session
-    Session --> DB[(PostgreSQL and RLS)]
-    Browser --> Auth[Supabase Auth: email OTP or magic link]
-    Auth --> Next
-    Browser --> Storage[Supabase Storage: avatars and branding]
-    Actions --> Guard[Admin check for account management]
-    Guard --> Admin[Server-only service-role client]
-    Admin --> Auth
-    Admin --> DB
-    DB --> History[Contact triggers and stage history]
-    Founder[Founder] -->|Question| Claude[Claude]
-    Claude --> Connector[Custom MCP connector]
-    Connector -->|Tool call| MCP[MCP server on AWS]
-    MCP --> Tools[Tool handlers]
-    Tools -->|Database query| DB
-    DB -->|Query results| Tools
-    Tools -->|Tool result| MCP
-    MCP -->|Result through connector| Claude
-    Claude -->|Answer based on returned data| Founder
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Arial, sans-serif", "fontSize": "15px", "lineColor": "#64748b", "edgeLabelBackground": "#ffffff"}, "flowchart": {"curve": "basis", "nodeSpacing": 30, "rankSpacing": 40}}}%%
+flowchart TB
+    subgraph CRM["SALES WORKSPACE"]
+        direction TB
+        Team(["SDRs & Administrators"])
+        UI["React UI<br/>Sales workspace"]
+        App["Next.js App Router<br/>Server reads & actions"]
+        Session["User-session Client<br/>CRM reads & writes"]
+        Admin["Admin Client<br/>Account management"]
+        Team --> UI --> App
+        App --> Session
+        App --> Admin
+    end
+
+    subgraph AI["CONVERSATIONAL ACCESS"]
+        direction TB
+        Founder(["Founder"])
+        Claude["Claude<br/>Questions & answers"]
+        Connector["Custom MCP Connector"]
+        subgraph AWS["AWS · EXTERNAL SERVICE"]
+            MCP["MCP Server<br/>Tool dispatch"]
+            Tools["Tool Handlers<br/>Database retrieval"]
+        end
+        Founder <-->|"Conversation"| Claude
+        Claude <-->|"Tool calls & results"| Connector
+        Connector <--> MCP
+        MCP <--> Tools
+    end
+
+    subgraph DATA["SUPABASE · SHARED DATA PLATFORM"]
+        direction LR
+        Auth["Auth<br/>Email code & magic link"]
+        DB[("PostgreSQL<br/>CRM records & policies")]
+        Storage["Storage<br/>Avatars & branding"]
+        History["Stage Triggers<br/>Contact history"]
+        DB --> History
+    end
+
+    Session <-->|"User session"| DB
+    Tools <-->|"Query & result"| DB
+    UI -.->|"Sign-in"| Auth
+    UI -.->|"Media"| Storage
+    Admin -.->|"Manage users"| Auth
+    Admin -.->|"Manage profiles"| DB
+
+    classDef people fill:#0f172a,stroke:#0f172a,color:#ffffff,stroke-width:2px
+    classDef web fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:1.5px
+    classDef ai fill:#ede9fe,stroke:#7c3aed,color:#2e1065,stroke-width:1.5px
+    classDef aws fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:1.5px
+    classDef data fill:#d1fae5,stroke:#059669,color:#064e3b,stroke-width:1.5px
+    classDef support fill:#f1f5f9,stroke:#64748b,color:#0f172a,stroke-width:1.5px
+
+    class Team,Founder people
+    class UI,App,Session web
+    class Claude,Connector ai
+    class MCP,Tools aws
+    class DB data
+    class Auth,Storage,History,Admin support
+
+    style CRM fill:#f8fafc,stroke:#93c5fd,stroke-width:1px,color:#1e3a8a
+    style AI fill:#faf5ff,stroke:#c4b5fd,stroke-width:1px,color:#5b21b6
+    style AWS fill:#fff7ed,stroke:#fdba74,stroke-width:1px,color:#9a3412
+    style DATA fill:#f0fdf4,stroke:#6ee7b7,stroke-width:1px,color:#065f46
 ```
 
 The web application uses Server Components for reads and Server Actions for mutations. Supabase provides authentication, PostgreSQL, and media storage. A separate server-only client handles privileged account administration.
