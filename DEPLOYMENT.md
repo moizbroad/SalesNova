@@ -1,6 +1,11 @@
 # Deployment — connecting to a new Supabase project
 
-The **app code is ready** for everything below (incl. the 6-digit sign-in code).
+**Current setup blocker:** `supabase/migrations/0004_deals.sql` contains only `l`.
+Restore the real deals schema, triggers, and policies before attempting a complete
+fresh deployment. See [README.md](README.md) and the
+[technical write-up](docs/TECHNICAL_WRITEUP.md) for implementation status and known gaps.
+
+The application includes the six-digit sign-in UI.
 What follows is the **per-project setup** that lives inside Supabase + your host —
 it does **not** travel with the code, so it has to be done once on the target
 project.
@@ -33,9 +38,9 @@ In Supabase → **SQL Editor → New query**, paste and run **in order**:
 1. `supabase/migrations/0001_initial_schema.sql` — profiles, contacts, stage history, RLS, triggers
 2. `supabase/migrations/0002_avatars_storage.sql` — avatar storage bucket
 3. `supabase/migrations/0003_branding_storage.sql` — logo storage bucket
-4. `supabase/migrations/0004_deals.sql` — deals, deal_stage_history, deal_notes (admin-only RLS) + triggers
+4. **Blocked:** `supabase/migrations/0004_deals.sql` is incomplete. Do not run it as-is; restore and review the missing deals schema first.
 
-Each is safe to re-run. Without these the app has no tables and will error.
+The first three files include rerun guards. The fourth is currently invalid, so this checkout cannot reproduce the full database.
 
 ---
 
@@ -121,4 +126,4 @@ inside the app.
 3. Enter the code → you're in.
 4. Admin sees **Deals** in the sidebar; SDRs do not.
 
-That's the full chain. The app side is fixed; everything above is project config.
+These manual checks do not replace database authorization tests. Full deployment remains blocked until the deals migration is restored.
