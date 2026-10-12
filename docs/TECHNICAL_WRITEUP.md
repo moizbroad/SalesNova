@@ -1,12 +1,14 @@
 # SalesNova: technical write-up
 
-This document connects the CRM's business workflow to its implementation. It distinguishes source-backed behavior from proposed engineering work. It is not a claim of production validation or a record of individual authorship.
+This document connects the CRM's business workflow to its implementation. It distinguishes source-backed CRM behavior, the external Claude/MCP integration described by the project owner, and proposed improvements. The external service has not been independently inspected or tested in this documentation pass.
 
 ## Problem and solution
 
 A sales workflow needs a consistent answer to three questions: where is each lead, what happened last, and what should happen next? SalesNova models that context using contacts, owners, activities, qualification stages, and opportunities.
 
 The application separates contact work for SDRs from opportunity administration. It combines searchable tables, pipeline boards, activity timelines, and reporting so the same records support day-to-day follow-up and management review.
+
+The founder also uses Claude through a custom connector to ask about CRM data exposed by an AWS-hosted MCP server. The server executes database queries through its tools and returns results to Claude. This adds conversational access alongside the CRM interface.
 
 The actual pre-project workflow, why the team chose a custom CRM over a commercial product, and any measured time savings require first-hand evidence from the project owner. They cannot be established from source code.
 
@@ -87,55 +89,60 @@ The following findings are based on committed source, not testing against a live
 
 Before using this as an untrusted or multi-tenant service, tighten database policies and profile column permissions, enforce active-user checks, sanitize rich text, and validate access through the Supabase API as well as the UI. Restore and review deal policies before claiming database-level role isolation.
 
-## Proposed Claude and MCP extension
+## Claude and MCP integration
 
-**Status: design proposal only.** No MCP server, Claude API client, connector configuration, tool handlers, or integration tests were found in this checkout. An externally hosted integration, if one exists, needs separate evidence.
+**Status: existing external integration, confirmed by the project owner.** The owner connected Claude using a custom connector to an MCP server hosted on AWS. The founder can ask questions about CRM data exposed by that server's tools. The MCP server code, connector configuration, and deployment artifacts are outside this repository.
 
-The additional problem this extension would address is navigating business data in natural language: finding relevant records and summarizing context without manually opening several screens. Its value should be measured against the existing UI and reports.
+### Question-to-answer flow
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Claude as Claude client
-    participant MCP as Proposed MCP server
-    participant Access as Identity and permission checks
+    actor Founder
+    participant Claude
+    participant Connector as Custom MCP connector
+    participant MCP as MCP server on AWS
+    participant Tool as Selected tool handler
     participant DB as Supabase / PostgreSQL
-    User->>Claude: Which contacts need follow-up this week?
-    Claude->>MCP: list_contacts with validated filters
-    MCP->>Access: Validate caller and allowed scope
-    Access-->>MCP: Authorized identity and permissions
-    MCP->>DB: Bounded, read-only structured query
-    DB-->>MCP: Authorized rows
-    MCP-->>Claude: Records, IDs, pagination, explicit errors
-    Claude-->>User: Summary with record references
+    Founder->>Claude: Ask a question about CRM data
+    Claude->>Connector: Call a relevant exposed tool
+    Connector->>MCP: Forward tool call and arguments
+    MCP->>Tool: Dispatch tool call
+    Tool->>DB: Query the required CRM data
+    DB-->>Tool: Query results
+    Tool-->>MCP: Tool result
+    MCP-->>Connector: Return result
+    Connector-->>Claude: Provide retrieved data
+    Claude-->>Founder: Answer based on returned data
 ```
 
-### Proposed tool contracts
+The connector is the configured connection between Claude and the remote MCP server; it is shown separately to make that connection explicit, not to assert a separately deployed connector service. The CRM web application and MCP tools access the same business database through separate application paths. No specific AWS service, MCP framework, or model version has been supplied.
 
-These names and schemas are examples for future implementation. They are not callable tools in this repository.
+### What is established and what still needs documentation
 
-| Tool | Proposed input | Proposed output |
-| --- | --- | --- |
-| `list_contacts` | Optional stage, owner ID, follow-up date range, cursor; page size capped at 50 | Minimal contact fields, record IDs, next cursor |
-| `get_contact_activity` | Contact UUID, optional date range, activity type, cursor | Authorized notes, conversations, or meetings with timestamps and IDs |
-| `list_deals` | Stage, owner ID, cursor; admin access required | Authorized deal summaries and next cursor |
-| `get_pipeline_summary` | Date range, optional owner/source; admin access required | Database-computed counts and values with currency and metric definitions |
+| Area | Available information |
+| --- | --- |
+| User experience | The founder asks Claude questions about CRM data |
+| Connection | Claude uses a custom MCP connector configured by the project owner |
+| Hosting | The MCP server is hosted on AWS |
+| Tool execution | Claude calls an exposed tool; the server's handler queries the database and returns results |
+| Answer generation | Claude answers using returned database data |
+| Tool catalog | Exact names, schemas, dataset coverage, and pagination behavior have not been supplied |
+| Authentication and authorization | Credential flow, database role, permission checks, and account mapping have not been supplied |
+| Mutations | Read-only enforcement and any write-capable tools have not been confirmed |
+| Retrieval details | Database queries are confirmed; query construction, RAG, embeddings, or vector-search use cannot be established from this checkout |
+| Evaluation | No tool-call traces, correctness tests, latency measurements, or quality scores are included here |
 
-Validate UUIDs, enums, date ranges, text lengths, and pagination limits on the server. Derive identity from verified credentials, never from an `acting_user_id` argument supplied by the model. Return a stable envelope such as `{ data, next_cursor, error }`, and distinguish an authorized empty result from permission denial or database failure.
+The supported data scope is whatever the deployed tools expose. The founder's ability to ask questions does not by itself establish unrestricted access to every table or permission to modify records.
 
-### Authentication and permissions to implement
+### Engineering rationale and review targets
 
-The MCP transport and credential flow have not been selected. The implementation must authenticate its caller, map that identity to a CRM user, validate the active account and role on each request, and apply database-enforced scope. Browser login cookies alone do not establish an MCP client's identity.
+The MCP layer provides a tool boundary between Claude and the database: Claude requests a tool operation, the server retrieves the data, and Claude interprets the result. This supports natural-language access to the CRM alongside its existing screens and reports. The owner's original reasons for selecting Claude, MCP, and a particular AWS deployment still need a first-hand account.
 
-A service-role credential must not be exposed to Claude or used as a shortcut around user permissions. The existing profile and contact policy gaps need to be resolved before relying on this boundary. Tests must include direct tool invocation and direct data access, not only chat prompts.
+To make the integration reproducible for reviewers, add the external source link or a sanitized tool catalog, example arguments and responses using synthetic data, the AWS deployment design, and an explanation of authentication and database permissions. Do not include credentials, live customer records, or private connection settings.
 
-### Why read-only tools and structured queries?
+Validation should cover server-side argument checks, result-size limits, pagination, explicit error handling, and direct authorization tests. Confirm whether tools enforce read-only access before describing the integration as read-only. If tools access the database through privileged credentials, document and test the permission checks applied on that path; the web application's session checks do not establish the external server's behavior.
 
-Read-only business tools would bound what the assistant can do and separate answer generation from mutations. The proposed server would expose no arbitrary SQL, deletes, account changes, outbound messaging, or unrestricted exports. Tools would supply deterministic filters and aggregates while Claude interprets questions and summarizes results.
-
-Contacts, stages, ownership, dates, and deal amounts already have structured fields, so ordinary database queries are the first proposed retrieval mechanism. RAG pipelines, embeddings, and vector search are not implemented. Semantic retrieval for free-text notes could be evaluated later if keyword/structured retrieval proves insufficient.
-
-Bounded result sizes, field selection, aggregate tools, and explicit cursors would reduce unnecessary context. Summaries should include record references and treat retrieved note content as data, not instructions. No model version, latency budget, operating cost, or model comparison has been measured; choosing Claude here reflects the proposed project direction, not evidence that it outperforms alternatives.
+Context size, query performance, response grounding, and prompt injection through retrieved notes are useful evaluation targets. Their handling in the deployed server has not been inspected here.
 
 ## Validation plan and results
 
@@ -150,7 +157,7 @@ There is no committed automated test suite, CI workflow, benchmark report, or AI
 | Authentication | Test invalid/expired OTPs, callbacks, signed-out routes, and deactivated existing sessions |
 | Authorization | Use admin and SDR sessions to call actions and Supabase directly; attempt role self-escalation, note edits, and deal access |
 | Failure handling | Simulate database rejection and unavailable data; verify failures are not presented as successful empty results |
-| Proposed MCP | Validate tool arguments, pagination, empty results, permission denial, injected instructions in notes, and record-grounded answers |
+| External MCP integration | Validate tool arguments, pagination, empty results, permission denial, injected instructions in notes, and record-grounded answers |
 
 A future AI evaluation set should pair each question with expected tool selection, arguments, authorized records, and answer facts. Measure tool-selection accuracy, result correctness, unsupported claims, authorization failures, and end-to-end p50/p95 latency. Track token use and cost per question. No scores or business improvements are claimed yet.
 
@@ -159,18 +166,18 @@ A future AI evaluation set should pair each question with expected tool selectio
 | Evidence | Current status |
 | --- | --- |
 | Source | [Public SalesNova repository](https://github.com/moizbroad/SalesNova) |
-| Deployment | Configuration notes exist; no verified live demo URL supplied |
+| Deployment | Owner confirms an AWS-hosted MCP server and Claude custom connector; no verified public CRM demo URL supplied |
 | Reproducibility | npm lockfile and base migrations exist; deals migration is incomplete |
 | Demo dataset | No synthetic seed or shared demo credentials supplied |
-| Personal contribution | Not established by this review; commit history alone does not prove individual ownership of every feature |
+| Personal contribution | Owner confirms connecting Claude through a custom MCP connector; a full module-by-module contribution breakdown has not been supplied |
 | Business results | No measured before/after results supplied |
 | Publication rights | Company branding remains in code; ownership/permission is not established by repository visibility, and no license file is supplied |
 
-For an interview, add first-hand evidence of which modules you designed, implemented, tested, and deployed; the hardest bug you personally debugged; and a specific trade-off you made. Support each with a commit, reproducible example, or artifact. Do not describe proposed tools or test cases as completed work.
+For an interview, add first-hand evidence of which modules you designed, implemented, tested, and deployed; the hardest bug you personally debugged; and a specific trade-off you made. Support each with a commit, reproducible example, or artifact. Distinguish the existing external integration from suggested improvements and test cases that have not been run.
 
 ## AI-assisted development
 
-The current documentation pass used Codex to inspect routes, actions, schema, policies, and reporting logic, identify mismatches in the previous README, and organize this source-backed write-up. It did not validate a live deployment or implement the proposed AI integration.
+The current documentation pass used Codex to inspect routes, actions, schema, policies, and reporting logic, identify mismatches in the previous README, and organize this source-backed write-up. The project owner subsequently clarified the existing external Claude/MCP integration, and the diagrams and integration description were updated accordingly. This documentation pass did not validate or change that live service.
 
 Historical use of Claude Code or other assistants during application development has not been supplied. Neither AI-generated test coverage nor a completed LLM security stress test can be claimed from the available evidence.
 
@@ -183,4 +190,4 @@ Useful evidence to add is a concrete suggestion you accepted or rejected, the re
 3. Make conversion atomic and define reporting behavior for stage re-entry and currencies.
 4. Add workflow, authorization, and regression tests using synthetic fixtures.
 5. Introduce server-side pagination and database aggregates for larger datasets.
-6. Implement the proposed MCP tools, then measure correctness, authorization, latency, and usefulness.
+6. Document the existing MCP server and tool contracts, then measure correctness, authorization, latency, and usefulness.
